@@ -15,8 +15,8 @@ INC		= include/CGIProcess.hpp include/Client.hpp\
 		  include/Event.hpp include/HttpRequest.hpp \
 		  include/HttpResponse.hpp include/Location.hpp \
 		  include/ServerContext.hpp include/Tokenizer.hpp \
-
 		  include/Trie.hpp include/VirtualServer.hpp
+
 NAME	 = webserv
 
 
