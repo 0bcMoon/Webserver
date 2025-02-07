@@ -9,6 +9,7 @@
 #include <sys/unistd.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cerrno>
 #include <cstddef>
@@ -451,24 +452,12 @@ int HttpResponse::parseCgistatus()
 	return (1);
 }
 
-static int vecIsPrint(const std::vector<char> &vec)
-{
-	for (size_t i = 0; i < vec.size(); i++)
-	{
-		if (!std::isprint(vec[i]) && vec[i] != '\r' && vec[i] != '\n')
-			return (0);
-	}
-	return (1);
-}
-
 void HttpResponse::parseCgiOutput()
 {
 	std::string headers(CGIOutput.data(), CGIOutput.size());
 	size_t pos = headers.find("\n");
 	size_t strIt = 0;
 
-	if (!vecIsPrint(CGIOutput))
-		return setHttpResError(502, "Bad Gateway");
 	if (CGIOutput.size() == 0 || headers.find("\r\n\r\n") == std::string::npos)
 		return setHttpResError(502, "Bad Gateway");
 	while (pos != std::string::npos)
@@ -719,12 +708,6 @@ void HttpResponse::responseCooking()
 			writeResponse();
 		if (methode == DELETE)
 			deleteMethodeHandler();
-		// if (bodyType == LOAD_FILE)
-		// {
-		// 	this->responseFd = open(fullPath.c_str(), O_RDONLY | O_NONBLOCK);
-		// 	if (responseFd < 0)
-		// 		setHttpResError(500, "Internal Server Error");
-		// }
 	}
 }
 

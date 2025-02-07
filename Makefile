@@ -1,4 +1,3 @@
-
 SRC		= src/CGIProcess.cpp src/Client.cpp src/Connections.cpp \
 		  src/DataTypeImpl.cpp src/HttpRequest.cpp src/HttpResponse.cpp\
 		  src/Location.cpp src/ServerContext.cpp src/Tokenizer.cpp\
@@ -16,8 +15,8 @@ INC		= include/CGIProcess.hpp include/Client.hpp\
 		  include/Event.hpp include/HttpRequest.hpp \
 		  include/HttpResponse.hpp include/Location.hpp \
 		  include/ServerContext.hpp include/Tokenizer.hpp \
-		  include/Trie.hpp include/VirtualServer.hpp
 
+		  include/Trie.hpp include/VirtualServer.hpp
 NAME	 = webserv
 
 

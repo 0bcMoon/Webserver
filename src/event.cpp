@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
@@ -39,6 +40,8 @@ Event::Event(int max_connection, int max_events, ServerContext *ctx)
 Event::~Event()
 {
 	delete this->evList;
+	delete this->eventChangeList;
+
 	VirtualServerMap_t::iterator it = this->virtuaServers.begin();
 	for (; it != this->virtuaServers.end(); it++)
 		close(it->first);
@@ -47,6 +50,12 @@ Event::~Event()
 	{
 		if (this->virtuaServers.find(it->first) == this->virtuaServers.end())
 			close(it2->first);
+	}
+	ProcMap_t::iterator kv = this->procs.end();
+	for (; kv != this->procs.end(); kv++)
+	{
+		kv->second.die();
+		kv->second.clean();
 	}
 	if (this->kqueueFd >= 0)
 		close(this->kqueueFd);
@@ -159,10 +168,7 @@ int Event::CreateSocket(SocketAddrSet_t::iterator &address)
 
 int Event::setNonBlockingIO(int sockfd, bool sockserver)
 {
-	int flags = fcntl(sockfd, F_GETFL, 0);
-	if (flags == -1)
-		return (-1);
-	if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK | FD_CLOEXEC) < 0) // may faild
+	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | FD_CLOEXEC) < 0)
 		return (-1);
 	if (sockserver)
 		return (0);
@@ -203,7 +209,6 @@ bool Event::Listen()
 void Event::CreateChangeList()
 {
 	SockAddr_in::iterator it = this->sockAddrInMap.begin();
-	// SERVER socket does not need to monitor writes
 	for (int i = 0; it != this->sockAddrInMap.end(); it++, i++)
 		EV_SET(&this->eventChangeList[i], it->first, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, NULL);
 	if (kevent(this->kqueueFd, this->eventChangeList, this->numOfSocket, NULL, 0, NULL) < 0)
@@ -230,7 +235,7 @@ int Event::newConnection(int socketFd, Connections &connections)
 		return (close(newSocketFd), -1);
 	struct kevent ev_set[3];
 	EV_SET(&ev_set[0], newSocketFd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, NULL);
-	EV_SET(&ev_set[1], newSocketFd, EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0, NULL); // disable write event to stop
+	EV_SET(&ev_set[1], newSocketFd, EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0, NULL);
 	EV_SET(
 		&ev_set[2],
 		newSocketFd,
@@ -250,22 +255,22 @@ void Event::setWriteEvent(Client *client, uint16_t flags)
 	if (client->writeEventState == flags)
 		return;
 	struct kevent ev;
-	EV_SET(&ev, client->getFd(), EVFILT_WRITE, flags, 0, 0, NULL);
+	EV_SET(&ev, client->getFd(), EVFILT_WRITE, EV_ADD | flags, 0, 0, NULL);
 	if (kevent(this->kqueueFd, &ev, 1, NULL, 0, NULL) < 0)
-		throw Event::EventExpection("kevent faild:" + std::string(strerror(errno)));
+		throw Event::EventExpection("kevent : client write event :");
 	client->writeEventState = flags;
 }
 
 void Event::ReadEvent(const struct kevent *ev)
 {
-	if (ev->flags & EV_EOF && ev->data <= 0)
+	if ((ev->flags & EV_EOF) && ev->data <= 0)
 		connections.closeConnection(ev->ident);
 	else
 	{
 		Client *client = connections.requestHandler(ev->ident, ev->data);
 		if (!client)
 			return;
-		while (!client->request.eof && client->request.state != REQ_ERROR) // whats is header does not arrive fully ?
+		while (!client->request.eof && client->request.state != REQ_ERROR)
 		{
 			client->request.feed();
 			if (!client->request.data.back()->isRequestLineValidated() && client->request.state == BODY)
@@ -304,10 +309,8 @@ int Event::RegisterNewProc(Client *client)
 	EV_SET(&ev[2], proc.fout, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, (void *)(size_t)proc.pid);
 	if (kevent(this->kqueueFd, ev, evSize, 0, 0, NULL) < 0)
 	{
-		proc.clean();
 		proc.die();
-		response.setHttpResError(502, "Bad Gateway");
-		return (-1);
+		throw Event::EventExpection("Kevent: CGI process: ");
 	}
 	client->cgi_pid = proc.pid;
 	proc.client = client->getFd();
@@ -319,7 +322,7 @@ int Event::RegisterNewProc(Client *client)
 
 void Event::WriteEvent(const struct kevent *ev)
 {
-	if (ev->flags & EV_EOF && ev->data <= 0)
+	if ((ev->flags & EV_EOF )&& ev->data <= 0)
 	{
 		connections.closeConnection(ev->ident);
 		return;
@@ -367,9 +370,8 @@ void Event::WriteEvent(const struct kevent *ev)
 void Event::ReadPipe(const struct kevent *ev)
 {
 	const char seq[4] = {'\r', '\n', '\r', '\n'};
-
-	if (ev->flags & EV_EOF && !ev->data)
-		return (void)close(ev->ident);
+	if ((ev->flags & EV_EOF) && ev->data == 0)
+		return;
 	ProcMap_t::iterator p = this->procs.find((size_t)ev->udata);
 	Proc &proc = p->second;
 	Client *client = this->connections.getClient(proc.client);
@@ -377,7 +379,7 @@ void Event::ReadPipe(const struct kevent *ev)
 		return proc.die();
 	HttpResponse *response = &client->response;
 	int read_size = std::min(ev->data, CGI_BUFFER_SIZE);
-	int r = read(ev->ident, proc.buffer.data() + proc.offset, read_size); // create a event buffer
+	int r = read(ev->ident, proc.buffer.data() + proc.offset, read_size);
 	if (r < 0)
 		return response->setHttpResError(500, "Internal server Error"), proc.die();
 	read_size += proc.offset;
@@ -385,7 +387,7 @@ void Event::ReadPipe(const struct kevent *ev)
 	if (proc.outToFile)
 	{
 		if (proc.writeBody(proc.buffer.data(), read_size) < 0)
-			return response->setHttpResError(500, "Internal server Error"), proc.die(); // kill cgi
+			return proc.die(); // kill cgi
 		return;
 	}
 	else if (read_size < 4)
@@ -398,7 +400,7 @@ void Event::ReadPipe(const struct kevent *ev)
 	if (it != (buffer.begin() + read_size))
 	{
 		it = it + 4;
-		response->CGIOutput.insert(response->CGIOutput.end(), buffer.begin(), it); // the size of header gonna be small
+		response->CGIOutput.insert(response->CGIOutput.end(), buffer.begin(), it); 
 		if (proc.writeBody(&(*it), buffer.begin() + read_size - it) < 0)
 			return response->setHttpResError(500, "Internal server Error"), proc.die(); // kill cgi
 		proc.outToFile = true;
@@ -455,9 +457,7 @@ void Event::ProcEvent(const struct kevent *ev)
 			this->deleteProc(p));
 	else if (status)
 		return (
-			client->response.setHttpResError(502, "Bad Gateway"), 
-			client->response.logResponse(), 
-			this->deleteProc(p));
+			client->response.setHttpResError(502, "Bad Gateway"), client->response.logResponse(), this->deleteProc(p));
 	client->response.state = START_CGI_RESPONSE;
 	proc.clean();
 	client->response.cgiOutFile = proc.output;
@@ -585,12 +585,12 @@ void Event::KeepAlive(Client *client)
 		this->ctx->getKeepAliveTime(),
 		NULL);
 	if (kevent(this->kqueueFd, &ev, 1, NULL, 0, NULL) < 0)
-		throw Event::EventExpection("kevent : Timer: " + std::string(strerror(errno)));
+		throw Event::EventExpection("kevent : client Timer: ");
 }
 
 Event::EventExpection::EventExpection(const std::string &msg) throw()
 {
-	this->msg = msg;
+	this->msg = msg + strerror(errno);
 }
 
 const char *Event::EventExpection::what() const throw()

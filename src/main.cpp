@@ -11,19 +11,18 @@
 
 #include <cstring>
 
-#define MAX_EVENTS 32
-#define MAX_CONNECTIONS_QUEUE 256
+#define MAX_EVENTS 128
+#define MAX_CONNECTIONS_QUEUE 128
 #define CONF_FILE_PATH "webserv.conf"
 
 ServerContext *LoadConfig(const char *path)
 {
-	ServerContext *ctx = NULL;
+	ServerContext *ctx = new ServerContext();;
 	try
 	{
 		Tokenizer tokenizer;
 		tokenizer.readConfig(path);
 		tokenizer.CreateTokens();
-		ctx = new ServerContext();
 		tokenizer.parseConfig(ctx);
 		ctx->init();
 	}
@@ -36,21 +35,27 @@ ServerContext *LoadConfig(const char *path)
 	return (ctx);
 }
 
-void ctrl_c(int )
+static void ctrl_c(int )
 {
 	Event::Running(1);
 }
 
 
-void leak() {system("leaks webserv");}
+void leak() {system("lsof -c webserv && leaks webserv");}
+
+static void handelSignal()
+{
+	signal(SIGINT, ctrl_c);
+	signal(SIGPIPE, SIG_IGN);
+	std::srand(time(NULL));
+}
 int main(int ac, char **argv)
 {
 
 	atexit(leak);
 
+	handelSignal();
 	ServerContext *ctx = NULL;
-	signal(SIGINT, ctrl_c);
-	std::srand(time(NULL));
 	if (ac > 2)
 	{
 		std::cerr << "usage: webserv confile\n";
