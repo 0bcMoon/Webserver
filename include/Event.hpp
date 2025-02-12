@@ -1,6 +1,5 @@
 #ifndef Event_HPP
 #define Event_HPP
-#include <sys/event.h>
 #include <exception>
 #include <vector>
 #include "Connections.hpp"
@@ -8,6 +7,13 @@
 #include "ServerContext.hpp"
 #include "VirtualServer.hpp"
 
+#ifdef _WIN32
+// Windows-specific code
+#elif __linux__
+// Linux-specific code
+#elif __APPLE__
+#include <sys/event.h>
+#endif
 
 class Event
 {

@@ -1,5 +1,4 @@
 #include "Client.hpp"
-#include <sys/event.h>
 #include <sys/fcntl.h>
 #include <unistd.h>
 #include <cmath>

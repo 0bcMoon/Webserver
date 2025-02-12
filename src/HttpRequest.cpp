@@ -1,4 +1,4 @@
-#include "../include/HttpRequest.hpp"
+#include "HttpRequest.hpp"
 #include <fstream>
 #include <strings.h>
 #include <sys/fcntl.h>
@@ -24,7 +24,7 @@ HttpRequest::HttpRequest() : fd(-1)
 {
 	reqSize = 0;
 	bodySize = 0;
-	bodyState = _NEW;
+	bodyState = NEW_REQUEST;
 	state = NEW;
 	reqBufferSize = 0;
 	error.code = 200;
@@ -39,7 +39,7 @@ HttpRequest::HttpRequest(int fd) : fd(fd), reqBuffer(BUFFER_SIZE)
 	location = NULL;
 	bodySize = -1;
 	state = NEW;
-	bodyState = _NEW;
+	bodyState = NEW_REQUEST;
 	reqBufferSize = 0;
 	error.code = 200;
 	reqBufferIndex = 0;
@@ -57,7 +57,7 @@ void HttpRequest::clear()
 	totalChunkSize = 0;
 	chunkSize = 0;
 	state = NEW;
-	bodyState = _NEW;
+	bodyState = NEW_REQUEST;
 	chunkIndex = 0;
 	sizeStr.clear();
 	crlfState = READING;
@@ -910,7 +910,7 @@ int HttpRequest::parseMultiPart()
 		}
 	}
 
-	if (bodyState == _NEW)
+	if (bodyState == NEW_REQUEST)
 		handleNewBody();
 	while (vec.size() > tmp.bodyIt)
 	{

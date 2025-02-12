@@ -2,7 +2,6 @@
 #define HTTPREQUEST_HPP
 
 #include <fstream>
-#include <sys/event.h>
 #include <cstddef>
 #include <map>
 #include <string>
@@ -140,7 +139,7 @@ class HttpRequest
 private:
 	enum multiPartState
 	{
-		_NEW,
+		NEW_REQUEST,
 		_ERROR,
 		BORDER,
 		MULTI_PART_HEADERS,

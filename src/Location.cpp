@@ -1,7 +1,6 @@
 
 #include "Location.hpp"
 #include <fcntl.h>
-#include <sys/_types/_s_ifmt.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 #include <unistd.h>

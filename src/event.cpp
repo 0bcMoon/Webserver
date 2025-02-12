@@ -1,12 +1,11 @@
 #include "Event.hpp"
-#include <netdb.h>
-#include <sys/_endian.h>
-#include <sys/_types/_errno_t.h>
-#include <sys/event.h>
-#include <sys/fcntl.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include "CGIProcess.hpp"
+#include "Client.hpp"
+#include "Connections.hpp"
+#include "DataType.hpp"
+#include "HttpRequest.hpp"
+#include "HttpResponse.hpp"
+#include "VirtualServer.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
@@ -15,20 +14,23 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <netdb.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/fcntl.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <vector>
-#include "CGIProcess.hpp"
-#include "Client.hpp"
-#include "Connections.hpp"
-#include "DataType.hpp"
-#include "HttpRequest.hpp"
-#include "HttpResponse.hpp"
-#include "VirtualServer.hpp"
+
+
+
+#ifdef __APPLE__
 
 Event::Event(int max_connection, int max_events, ServerContext *ctx)
-	: connections(ctx, -1), MAX_CONNECTION_QUEUE(max_connection), MAX_EVENTS(max_events)
+	: connections(ctx, -1), MAX_CONNECTION_QUEUE(max_connection),
+	  MAX_EVENTS(max_events)
 {
 	this->ctx = ctx;
 	this->evList = NULL;
@@ -43,8 +45,7 @@ Event::~Event()
 	delete this->eventChangeList;
 
 	VirtualServerMap_t::iterator it = this->virtuaServers.begin();
-	for (; it != this->virtuaServers.end(); it++)
-		close(it->first);
+	for (; it != this->virtuaServers.end(); it++) close(it->first);
 	std::map<int, VirtualServer *>::iterator it2 = this->defaultServer.begin();
 	for (; it2 != this->defaultServer.end(); it2++)
 	{
@@ -63,23 +64,29 @@ Event::~Event()
 
 void Event::InsertDefaultServer(VirtualServer *server, int socketFd)
 {
-	std::map<int, VirtualServer *>::iterator dvserver = this->defaultServer.find(socketFd);
+	std::map<int, VirtualServer *>::iterator dvserver =
+		this->defaultServer.find(socketFd);
 	if (dvserver != this->defaultServer.end())
 	{
-		if (dvserver->second->getServerNames().size() == 0 && server->getServerNames().size() == 0)
+		if (dvserver->second->getServerNames().size() == 0 &&
+			server->getServerNames().size() == 0)
 		{
-			std::cerr << "conflict default server (uname server) already exist on port\n";
+			std::cerr << "conflict default server (uname server) already exist "
+						 "on port\n";
 			return;
 		}
 	}
 	this->defaultServer[socketFd] = server;
 }
 
-void Event::insertServerNameMap(ServerNameMap_t &serverNameMap, VirtualServer *server, int socketFd)
+void Event::insertServerNameMap(ServerNameMap_t &serverNameMap,
+								VirtualServer *server, int socketFd)
 {
 	const std::set<std::string> &serverNames = server->getServerNames();
-	if (serverNames.size() == 0) // if there is no server name  uname will be the
-		this->InsertDefaultServer(server, socketFd); // default server in that port
+	if (serverNames.size() ==
+		0) // if there is no server name  uname will be the
+		this->InsertDefaultServer(server,
+								  socketFd); // default server in that port
 	else
 	{
 		std::set<std::string>::iterator it = serverNames.begin();
@@ -87,7 +94,9 @@ void Event::insertServerNameMap(ServerNameMap_t &serverNameMap, VirtualServer *s
 		{
 			if (serverNameMap.find(*it) != serverNameMap.end())
 			{
-				std::cerr << "confilict: server name already exist on some port host: " << *it << std::endl;
+				std::cerr << "confilict: server name already exist on some "
+							 "port host: "
+						  << *it << std::endl;
 				continue;
 			}
 			serverNameMap[*it] = server;
@@ -99,36 +108,45 @@ void Event::insertServerNameMap(ServerNameMap_t &serverNameMap, VirtualServer *s
 
 void Event::init()
 {
-	std::vector<VirtualServer> &virtualServers = ctx->getServers(); // get all  VServer
+	std::vector<VirtualServer> &virtualServers =
+		ctx->getServers(); // get all  VServer
 	for (size_t i = 0; i < virtualServers.size(); i++)
 	{
 		SocketAddrSet_t &socketAddr = virtualServers[i].getAddress();
 		if (socketAddr.empty())
-			throw std::runtime_error("Error: server should listen atleast one port\n");
+			throw std::runtime_error(
+				"Error: server should listen atleast one port\n");
 		SocketAddrSet_t::iterator it = socketAddr.begin();
 		for (; it != socketAddr.end(); it++)
 		{
 			int socketFd;
-			if (this->socketMap.find(*it) == this->socketMap.end()) // no need to create socket if it already exists
+			if (this->socketMap.find(*it) ==
+				this->socketMap
+					.end()) // no need to create socket if it already exists
 			{
 				socketFd = this->CreateSocket(it);
 				this->socketMap[*it] = socketFd;
 			}
 			else
 				socketFd = this->socketMap.at(*it);
-			VirtualServerMap_t::iterator it = this->virtuaServers.find(socketFd);
-			if (it == this->virtuaServers.end()) // create empty for socket map if not exist
+			VirtualServerMap_t::iterator it =
+				this->virtuaServers.find(socketFd);
+			if (it == this->virtuaServers
+						  .end()) // create empty for socket map if not exist
 			{
 				this->virtuaServers[socketFd] = ServerNameMap_t();
-				it = this->virtuaServers.find(socketFd); // take the reference of server map;
+				it = this->virtuaServers.find(
+					socketFd); // take the reference of server map;
 			}
 			ServerNameMap_t &serverNameMap = it->second;
-			this->insertServerNameMap(serverNameMap, &virtualServers[i], socketFd);
+			this->insertServerNameMap(serverNameMap, &virtualServers[i],
+									  socketFd);
 		}
 	}
 }
 
-static void error_panic(const std::string &func, int sock, struct addrinfo *result)
+static void error_panic(const std::string &func, int sock,
+						struct addrinfo *result)
 {
 	if (result)
 		freeaddrinfo(result);
@@ -141,22 +159,26 @@ int Event::CreateSocket(SocketAddrSet_t::iterator &address)
 	int optval = 1;
 
 	struct addrinfo *result, hints;
-	hints.ai_family = AF_INET; //  IPv4
+	hints.ai_family = AF_INET;		 //  IPv4
 	hints.ai_socktype = SOCK_STREAM; // TCP socket
-	hints.ai_flags = AI_PASSIVE; // for binding
-	hints.ai_protocol = 0; // TCP/IP proto
+	hints.ai_flags = AI_PASSIVE;	 // for binding
+	hints.ai_protocol = 0;			 // TCP/IP proto
 	hints.ai_canonname = NULL;
 	hints.ai_addr = NULL;
 	hints.ai_next = NULL;
-	int r = getaddrinfo(address->host.data(), address->port.data(), &hints, &result);
+	int r = getaddrinfo(address->host.data(), address->port.data(), &hints,
+						&result);
 	if (r != 0)
-		throw std::runtime_error("Error :getaddrinfo: " + std::string(gai_strerror(r)));
-	int socket_fd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+		throw std::runtime_error("Error :getaddrinfo: " +
+								 std::string(gai_strerror(r)));
+	int socket_fd =
+		socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 	if (socket_fd < 0)
 		error_panic("socket", -1, result);
 	if (this->setNonBlockingIO(socket_fd, true) < 0)
 		error_panic("setNonBlockingIO", socket_fd, result);
-	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0)
+	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
+				   sizeof(optval)) < 0)
 		error_panic("setsockopt", socket_fd, result);
 	if (bind(socket_fd, result->ai_addr, result->ai_addrlen) < 0)
 		error_panic("bind", socket_fd, result);
@@ -172,16 +194,22 @@ int Event::setNonBlockingIO(int sockfd, bool sockserver)
 		return (-1);
 	if (sockserver)
 		return (0);
-	int sock_buf_size = SOCK_BUFFER_SIZE; // set socket send and recv buffer size
-	int result = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &sock_buf_size, sizeof(sock_buf_size));
+	int sock_buf_size =
+		SOCK_BUFFER_SIZE; // set socket send and recv buffer size
+	int result = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &sock_buf_size,
+							sizeof(sock_buf_size));
 	if (result < 0)
 		return (-1);
-	result = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &sock_buf_size, sizeof(sock_buf_size));
+	result = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &sock_buf_size,
+						sizeof(sock_buf_size));
 	if (result < 0)
 		return (-1);
-	result = setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &sock_buf_size, sizeof(sock_buf_size));
+#if __APPLE__
+	result = setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &sock_buf_size,
+						sizeof(sock_buf_size));
 	if (result < 0)
 		return (-1);
+#endif // !__APPLE__
 	return (0);
 }
 
@@ -199,9 +227,11 @@ bool Event::Listen()
 	for (; it != this->socketMap.end(); it++)
 	{
 		if (!this->Listen(it->second))
-			throw std::runtime_error(
-				"could not listen: " + it->first.host + ":" + it->first.port + " " + strerror(errno));
-		std::cout << "server listen on " << it->first.host + ":" + it->first.port << std::endl;
+			throw std::runtime_error("could not listen: " + it->first.host +
+									 ":" + it->first.port + " " +
+									 strerror(errno));
+		std::cout << "server listen on "
+				  << it->first.host + ":" + it->first.port << std::endl;
 	}
 	return true;
 }
@@ -210,9 +240,13 @@ void Event::CreateChangeList()
 {
 	SockAddr_in::iterator it = this->sockAddrInMap.begin();
 	for (int i = 0; it != this->sockAddrInMap.end(); it++, i++)
-		EV_SET(&this->eventChangeList[i], it->first, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, NULL);
-	if (kevent(this->kqueueFd, this->eventChangeList, this->numOfSocket, NULL, 0, NULL) < 0)
-		throw std::runtime_error("kevent failed: could not regester server event: " + std::string(strerror(errno)));
+		EV_SET(&this->eventChangeList[i], it->first, EVFILT_READ,
+			   EV_ADD | EV_ENABLE, 0, 0, NULL);
+	if (kevent(this->kqueueFd, this->eventChangeList, this->numOfSocket, NULL,
+			   0, NULL) < 0)
+		throw std::runtime_error(
+			"kevent failed: could not regester server event: " +
+			std::string(strerror(errno)));
 	delete this->eventChangeList;
 	this->eventChangeList = NULL;
 }
@@ -223,7 +257,8 @@ void Event::initIOmutltiplexing()
 	this->eventChangeList = new struct kevent[this->numOfSocket];
 	this->kqueueFd = kqueue();
 	if (this->kqueueFd < 0)
-		throw std::runtime_error("kqueue faild: " + std::string(strerror(errno)));
+		throw std::runtime_error("kqueue faild: " +
+								 std::string(strerror(errno)));
 	this->CreateChangeList();
 }
 int Event::newConnection(int socketFd, Connections &connections)
@@ -234,16 +269,13 @@ int Event::newConnection(int socketFd, Connections &connections)
 	if (this->setNonBlockingIO(newSocketFd, false))
 		return (close(newSocketFd), -1);
 	struct kevent ev_set[3];
-	EV_SET(&ev_set[0], newSocketFd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, NULL);
-	EV_SET(&ev_set[1], newSocketFd, EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0, NULL);
-	EV_SET(
-		&ev_set[2],
-		newSocketFd,
-		EVFILT_TIMER,
-		EV_ADD | EV_ENABLE | EV_ONESHOT,
-		NOTE_SECONDS,
-		this->ctx->getKeepAliveTime(),
-		NULL);
+	EV_SET(&ev_set[0], newSocketFd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0,
+		   NULL);
+	EV_SET(&ev_set[1], newSocketFd, EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0,
+		   NULL);
+	EV_SET(&ev_set[2], newSocketFd, EVFILT_TIMER,
+		   EV_ADD | EV_ENABLE | EV_ONESHOT, NOTE_SECONDS,
+		   this->ctx->getKeepAliveTime(), NULL);
 	if (kevent(this->kqueueFd, ev_set, 3, NULL, 0, NULL) < 0)
 		return (close(newSocketFd), -1);
 	connections.addConnection(newSocketFd, socketFd);
@@ -273,7 +305,8 @@ void Event::ReadEvent(const struct kevent *ev)
 		while (!client->request.eof && client->request.state != REQ_ERROR)
 		{
 			client->request.feed();
-			if (!client->request.data.back()->isRequestLineValidated() && client->request.state == BODY)
+			if (!client->request.data.back()->isRequestLineValidated() &&
+				client->request.state == BODY)
 			{
 				client->request.decodingUrl();
 				client->request.splitingQuery();
@@ -297,16 +330,12 @@ int Event::RegisterNewProc(Client *client)
 		return (-1);
 	struct kevent ev[3];
 	int evSize = 3;
-	EV_SET(&ev[0], proc.pid, EVFILT_PROC, EV_ADD | EV_ENABLE | EV_ONESHOT, NOTE_EXIT, 0, NULL);
-	EV_SET(
-		&ev[1],
-		proc.pid,
-		EVFILT_TIMER,
-		EV_ADD | EV_ENABLE | EV_ONESHOT,
-		NOTE_SECONDS,
-		this->ctx->getCGITimeOut(),
-		(void *)(size_t)proc.pid);
-	EV_SET(&ev[2], proc.fout, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, (void *)(size_t)proc.pid);
+	EV_SET(&ev[0], proc.pid, EVFILT_PROC, EV_ADD | EV_ENABLE | EV_ONESHOT,
+		   NOTE_EXIT, 0, NULL);
+	EV_SET(&ev[1], proc.pid, EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT,
+		   NOTE_SECONDS, this->ctx->getCGITimeOut(), (void *)(size_t)proc.pid);
+	EV_SET(&ev[2], proc.fout, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0,
+		   (void *)(size_t)proc.pid);
 	if (kevent(this->kqueueFd, ev, evSize, 0, 0, NULL) < 0)
 	{
 		proc.die();
@@ -322,7 +351,7 @@ int Event::RegisterNewProc(Client *client)
 
 void Event::WriteEvent(const struct kevent *ev)
 {
-	if ((ev->flags & EV_EOF )&& ev->data <= 0)
+	if ((ev->flags & EV_EOF) && ev->data <= 0)
 	{
 		connections.closeConnection(ev->ident);
 		return;
@@ -331,8 +360,9 @@ void Event::WriteEvent(const struct kevent *ev)
 	if (kv == connections.clients.end())
 		return;
 	Client *client = &(kv->second);
-	if (client->request.data.size() == 0
-		|| (client->request.data.front()->state != REQUEST_FINISH && client->request.data.front()->state != REQ_ERROR))
+	if (client->request.data.size() == 0 ||
+		(client->request.data.front()->state != REQUEST_FINISH &&
+		 client->request.data.front()->state != REQ_ERROR))
 		return;
 	if (client->response.state == START)
 	{
@@ -342,7 +372,8 @@ void Event::WriteEvent(const struct kevent *ev)
 	}
 	if (client->response.state == START_CGI_RESPONSE)
 		client->respond(ev->data, 0);
-	if (client->response.state == CGI_EXECUTING && !this->RegisterNewProc(client))
+	if (client->response.state == CGI_EXECUTING &&
+		!this->RegisterNewProc(client))
 		return;
 	if (client->response.state == WRITE_BODY)
 	{
@@ -353,7 +384,8 @@ void Event::WriteEvent(const struct kevent *ev)
 		client->handleResponseError();
 	if (client->response.state == END_BODY)
 	{
-		bool conn = (!client->response.keepAlive || client->response.state == ERROR);
+		bool conn =
+			(!client->response.keepAlive || client->response.state == ERROR);
 		client->response.clear();
 		delete client->request.data[0];
 		client->request.data.erase(client->request.data.begin());
@@ -381,7 +413,8 @@ void Event::ReadPipe(const struct kevent *ev)
 	int read_size = std::min(ev->data, CGI_BUFFER_SIZE);
 	int r = read(ev->ident, proc.buffer.data() + proc.offset, read_size);
 	if (r < 0)
-		return response->setHttpResError(500, "Internal server Error"), proc.die();
+		return response->setHttpResError(500, "Internal server Error"),
+			   proc.die();
 	read_size += proc.offset;
 	proc.offset = 0;
 	if (proc.outToFile)
@@ -396,18 +429,22 @@ void Event::ReadPipe(const struct kevent *ev)
 		return;
 	}
 	std::vector<char> &buffer = proc.buffer;
-	std::vector<char>::iterator it = std::search(buffer.begin(), buffer.begin() + read_size, seq, seq + 4);
+	std::vector<char>::iterator it =
+		std::search(buffer.begin(), buffer.begin() + read_size, seq, seq + 4);
 	if (it != (buffer.begin() + read_size))
 	{
 		it = it + 4;
-		response->CGIOutput.insert(response->CGIOutput.end(), buffer.begin(), it); 
+		response->CGIOutput.insert(response->CGIOutput.end(), buffer.begin(),
+								   it);
 		if (proc.writeBody(&(*it), buffer.begin() + read_size - it) < 0)
-			return response->setHttpResError(500, "Internal server Error"), proc.die(); // kill cgi
+			return response->setHttpResError(500, "Internal server Error"),
+				   proc.die(); // kill cgi
 		proc.outToFile = true;
 	}
 	else
 	{
-		response->CGIOutput.insert(response->CGIOutput.end(), buffer.begin(), buffer.begin() + read_size - 3);
+		response->CGIOutput.insert(response->CGIOutput.end(), buffer.begin(),
+								   buffer.begin() + read_size - 3);
 		int j = 0;
 		for (int i = read_size - 3; i < read_size; i++)
 			proc.buffer[j++] = proc.buffer[i];
@@ -430,12 +467,14 @@ int Event::waitProc(int pid)
 	int status;
 	int signal;
 
-	waitpid(pid, &status, 0); // this event only run if process has finish so waitpid would not block
+	waitpid(pid, &status, 0); // this event only run if process has finish so
+							  // waitpid would not block
 	signal = WIFSIGNALED(status); // check if process exist normally
 	status = WEXITSTATUS(status); // check exist state
 	struct kevent event;
 	EV_SET(&event, pid, EVFILT_TIMER, EV_DELETE, 0, 0, NULL);
-	kevent(this->kqueueFd, &event, 1, NULL, 0, NULL); // if timer has not been trigger better to delete it
+	kevent(this->kqueueFd, &event, 1, NULL, 0,
+		   NULL); // if timer has not been trigger better to delete it
 	return (signal || status);
 }
 
@@ -451,13 +490,11 @@ void Event::ProcEvent(const struct kevent *ev)
 		return this->deleteProc(p);
 	this->setWriteEvent(client, EV_ENABLE);
 	if (proc.state == Proc::TIMEOUT)
-		return (
-			client->response.setHttpResError(504, "Gateway Timeout"),
-			client->response.logResponse(),
-			this->deleteProc(p));
+		return (client->response.setHttpResError(504, "Gateway Timeout"),
+				client->response.logResponse(), this->deleteProc(p));
 	else if (status)
-		return (
-			client->response.setHttpResError(502, "Bad Gateway"), client->response.logResponse(), this->deleteProc(p));
+		return (client->response.setHttpResError(502, "Bad Gateway"),
+				client->response.logResponse(), this->deleteProc(p));
 	client->response.state = START_CGI_RESPONSE;
 	proc.clean();
 	client->response.cgiOutFile = proc.output;
@@ -470,11 +507,14 @@ static void serverError(const char *error)
 	struct tm *timeinfo = localtime(&now);
 
 	std::stringstream ss;
-	const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+	const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+							"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 	const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-	ss << "[" << days[timeinfo->tm_wday] << " " << months[timeinfo->tm_mon] << " " << std::setfill('0') << std::setw(2)
-	   << timeinfo->tm_mday << " " << std::setfill('0') << std::setw(2) << timeinfo->tm_hour << ":" << std::setfill('0')
-	   << std::setw(2) << timeinfo->tm_min << ":" << std::setfill('0') << std::setw(2) << timeinfo->tm_sec << " "
+	ss << "[" << days[timeinfo->tm_wday] << " " << months[timeinfo->tm_mon]
+	   << " " << std::setfill('0') << std::setw(2) << timeinfo->tm_mday << " "
+	   << std::setfill('0') << std::setw(2) << timeinfo->tm_hour << ":"
+	   << std::setfill('0') << std::setw(2) << timeinfo->tm_min << ":"
+	   << std::setfill('0') << std::setw(2) << timeinfo->tm_sec << " "
 	   << (1900 + timeinfo->tm_year) << "]";
 	std::cerr << red;
 	std::cerr << ss.str() << " ";
@@ -491,7 +531,8 @@ void Event::eventLoop()
 	{
 		nev = kevent(this->kqueueFd, NULL, 0, this->evList, MAX_EVENTS, NULL);
 		if (nev < 0)
-			throw std::runtime_error("kevent failed: " + std::string(strerror(errno)));
+			throw std::runtime_error("kevent failed: " +
+									 std::string(strerror(errno)));
 		for (int i = 0; i < nev; i++)
 		{
 			const struct kevent *ev = &this->evList[i];
@@ -552,7 +593,8 @@ Location *Event::getLocation(Client *client)
 	serverfd = client->getServerFd();
 	const std::string &path = client->getPath();
 	std::string host = client->getHost();
-	ServerNameMap_t serverNameMap = this->virtuaServers.find(serverfd)->second; // always exist
+	ServerNameMap_t serverNameMap =
+		this->virtuaServers.find(serverfd)->second; // always exist
 	ServerNameMap_t::iterator _Vserver = serverNameMap.find(host);
 	if (_Vserver == serverNameMap.end())
 	{
@@ -566,7 +608,8 @@ Location *Event::getLocation(Client *client)
 		return (NULL);
 	else if (IsDefault)
 		client->response.server_name = *Vserver->getServerNames().begin();
-	struct sockaddr *addr = &this->sockAddrInMap.find(client->getServerFd())->second;
+	struct sockaddr *addr =
+		&this->sockAddrInMap.find(client->getServerFd())->second;
 	struct sockaddr_in *addr2 = (struct sockaddr_in *)addr;
 	client->response.server_port = ntohs(addr2->sin_port);
 	return (location);
@@ -576,14 +619,8 @@ void Event::KeepAlive(Client *client)
 {
 	struct kevent ev;
 
-	EV_SET(
-		&ev,
-		client->getFd(),
-		EVFILT_TIMER,
-		EV_ADD | EV_ENABLE | EV_ONESHOT,
-		NOTE_SECONDS,
-		this->ctx->getKeepAliveTime(),
-		NULL);
+	EV_SET(&ev, client->getFd(), EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT,
+		   NOTE_SECONDS, this->ctx->getKeepAliveTime(), NULL);
 	if (kevent(this->kqueueFd, &ev, 1, NULL, 0, NULL) < 0)
 		throw Event::EventExpection("kevent : client Timer: ");
 }
@@ -598,7 +635,9 @@ const char *Event::EventExpection::what() const throw()
 	return (this->msg.data());
 }
 
-Event::EventExpection::~EventExpection() throw() {}
+Event::EventExpection::~EventExpection() throw()
+{
+}
 
 bool Event::Running(bool state)
 {
@@ -607,3 +646,5 @@ bool Event::Running(bool state)
 		_state = !_state;
 	return (_state);
 }
+
+#endif /*__APPLE__*/

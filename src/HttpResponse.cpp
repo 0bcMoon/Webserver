@@ -3,7 +3,6 @@
 #include <execinfo.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <sys/dirent.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
@@ -580,9 +579,9 @@ int HttpResponse::sendBody(enum responseBodyType type)
 	if (type == CGI || type == LOAD_FILE)
 	{
 		if (cgiOutFilestram == NULL && type == CGI)
-			cgiOutFilestram = new std::ifstream(cgiOutFile, std::ios::binary);
+			cgiOutFilestram = new std::ifstream(cgiOutFile.data(), std::ios::binary);
 		else if (cgiOutFilestram == NULL && type == LOAD_FILE)
-			cgiOutFilestram = new std::ifstream(fullPath.c_str(), std::ios::binary);
+			cgiOutFilestram = new std::ifstream(fullPath.data(), std::ios::binary);
 		if (!cgiOutFilestram->is_open())
 			throw IOException("Read : " + std::string(strerror(errno)));
 

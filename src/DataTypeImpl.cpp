@@ -1,6 +1,5 @@
 #include <Tokenizer.hpp>
 #include <fcntl.h>
-#include <sys/event.h>
 #include <sys/fcntl.h>
 #include <sys/signal.h>
 #include <sys/stat.h>
